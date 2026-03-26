@@ -34,11 +34,11 @@ echo -e "${GREEN}========================================${NC}"
 #    exit 1
 #fi
 
-read -p "Введите email для Let's Encrypt: " SSL_EMAIL
-if [ -z "$SSL_EMAIL" ]; then
-    echo -e "${RED}Email обязателен для Let's Encrypt!${NC}"
-    exit 1
-fi
+#read -p "Введите email для Let's Encrypt: " SSL_EMAIL
+#if [ -z "$SSL_EMAIL" ]; then
+#    echo -e "${RED}Email обязателен для Let's Encrypt!${NC}"
+#    exit 1
+#fi
 
 # 1. Проверяем контейнер
 echo -e "\n${YELLOW}[1/11] Проверка контейнера amnezia-awg...${NC}"
