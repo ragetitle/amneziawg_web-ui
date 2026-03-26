@@ -16,23 +16,23 @@ echo -e "${GREEN}AmneziaWG Monitor PRO (порт 9871)${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 # Запрашиваем данные
-echo -e "\n${YELLOW}Настройка авторизации:${NC}"
-read -p "Введите логин для доступа к панели [admin]: " AUTH_USER
-AUTH_USER=${AUTH_USER:-admin}
+#echo -e "\n${YELLOW}Настройка авторизации:${NC}"
+#read -p "Введите логин для доступа к панели [admin]: " AUTH_USER
+#AUTH_USER=${AUTH_USER:-admin}
 
-read -sp "Введите пароль для доступа к панели: " AUTH_PASS
-echo ""
-if [ -z "$AUTH_PASS" ]; then
-    AUTH_PASS=$(openssl rand -base64 12)
-    echo -e "${YELLOW}Пароль сгенерирован: ${GREEN}$AUTH_PASS${NC}"
-fi
+#read -sp "Введите пароль для доступа к панели: " AUTH_PASS
+#echo ""
+#if [ -z "$AUTH_PASS" ]; then
+#    AUTH_PASS=$(openssl rand -base64 12)
+#   echo -e "${YELLOW}Пароль сгенерирован: ${GREEN}$AUTH_PASS${NC}"
+#fi
 
-echo -e "\n${YELLOW}Настройка SSL (Let's Encrypt):${NC}"
-read -p "Введите доменное имя (например, vpn.example.com): " DOMAIN
-if [ -z "$DOMAIN" ]; then
-    echo -e "${RED}Домен обязателен для SSL!${NC}"
-    exit 1
-fi
+#echo -e "\n${YELLOW}Настройка SSL (Let's Encrypt):${NC}"
+#read -p "Введите доменное имя (например, vpn.example.com): " DOMAIN
+#if [ -z "$DOMAIN" ]; then
+#    echo -e "${RED}Домен обязателен для SSL!${NC}"
+#    exit 1
+#fi
 
 read -p "Введите email для Let's Encrypt: " SSL_EMAIL
 if [ -z "$SSL_EMAIL" ]; then
@@ -465,10 +465,37 @@ echo 'ok';
 EOF
 chmod 644 /var/www/amnezia-stats/sort.php
 
-# 10. Настраиваем Nginx на порт 9871 с SSL
+# 10. Настраиваем Nginx на порт 9871 (без SSL)
 echo -e "\n${YELLOW}[10/11] Настройка Nginx на порт 9871...${NC}"
 
 cat > /etc/nginx/sites-available/amnezia-stats << EOF
+server {
+    listen 9871;
+    server_name _;
+
+    root /var/www/amnezia-stats;
+    index index.html index.php;
+
+    auth_basic "AmneziaWG Monitor";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass $PHP_FPM_SOCK;
+    }
+}
+EOF
+
+ln -sf /etc/nginx/sites-available/amnezia-stats /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+
+nginx -t && systemctl restart nginx
+echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
+
 server {
     listen 9871 ssl http2;
     server_name $DOMAIN;
@@ -508,11 +535,11 @@ nginx -t && systemctl restart nginx
 echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
 
 # 11. Получаем SSL сертификат
-echo -e "\n${YELLOW}[11/11] Получение SSL сертификата...${NC}"
-certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$SSL_EMAIL" || {
-    echo -e "${RED}⚠️ Не удалось получить SSL сертификат${NC}"
-    echo -e "${YELLOW}Проверьте, что домен $DOMAIN указывает на этот сервер и порт 80 открыт${NC}"
-}
+#echo -e "\n${YELLOW}[11/11] Получение SSL сертификата...${NC}"
+#certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$SSL_EMAIL" || {
+#    echo -e "${RED}⚠️ Не удалось получить SSL сертификат${NC}"
+#    echo -e "${YELLOW}Проверьте, что домен $DOMAIN указывает на этот сервер и порт 80 открыт${NC}"
+#}
 
 # Настройка cron
 (crontab -l 2>/dev/null | grep -v gen_stats.sh; echo "* * * * * /usr/local/bin/gen_stats.sh") | crontab -
@@ -528,8 +555,8 @@ echo -e "\n${GREEN}========================================${NC}"
 echo -e "${GREEN}✅ УСТАНОВКА ЗАВЕРШЕНА!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo -e ""
-echo -e "${YELLOW}🌐 Панель доступна по адресу:${NC}"
-echo -e "${GREEN}   https://${DOMAIN}:9871${NC}"
+#echo -e "${YELLOW}🌐 Панель доступна по адресу:${NC}"
+#echo -e "${GREEN}   https://${DOMAIN}:9871${NC}"
 echo -e "${YELLOW}   или https://${SERVER_IP}:9871 (если SSL не настроен)${NC}"
 echo -e ""
 echo -e "${YELLOW}🔑 Данные для входа:${NC}"
