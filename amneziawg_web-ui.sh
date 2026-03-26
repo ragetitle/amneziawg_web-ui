@@ -58,7 +58,7 @@ echo -e "${GREEN}✅ Обнаружен порт: $WG_PORT${NC}"
 # 3. Устанавливаем зависимости
 echo -e "\n${YELLOW}[3/11] Установка зависимостей...${NC}"
 apt update
-apt install -y nginx php-fpm certbot python3-certbot-nginx apache2-utils jq curl
+#apt install -y nginx php-fpm certbot python3-certbot-nginx apache2-utils jq curl
 echo -e "${GREEN}✅ Зависимости установлены${NC}"
 
 # 4. Создаём директории
