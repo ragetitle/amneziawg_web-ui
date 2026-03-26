@@ -23,4 +23,4 @@
 
 ```bash
 # Скачать и запустить установщик
-curl -sSL https://raw.githubusercontent.com/yourusername/amneziawg-monitor/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/ragetitle/amneziawg_web-ui/main/amneziawg_web-ui.sh | bash
