@@ -94,76 +94,46 @@ if (empty($peer_key)) {
     die('Peer key required');
 }
 
-// Читаем конфиг из контейнера
+// Получаем полный конфиг
 $config = shell_exec("docker exec amnezia-awg cat /opt/amnezia/awg/wg0.conf 2>/dev/null");
 if (empty($config)) {
     http_response_code(500);
     die('Cannot read config');
 }
 
-$lines = explode("\n", $config);
-$interface_section = "";
-$peer_section = "";
-$in_interface = false;
-$in_peer = false;
-$found_peer = false;
-$peer_content = "";
+// Разбиваем на секции
+$sections = explode('[Peer]', $config);
+$interface = $sections[0];
 
-// Собираем весь конфиг
-foreach ($lines as $line) {
-    // Начало секции Interface
-    if (preg_match('/^\[Interface\]/', $line)) {
-        $in_interface = true;
-        $in_peer = false;
-        $interface_section = "[Interface]\n";
-        continue;
-    }
-    
-    // Начало секции Peer
-    if (preg_match('/^\[Peer\]/', $line)) {
-        $in_interface = false;
-        $in_peer = true;
-        $peer_content = "";
-        continue;
-    }
-    
-    // Собираем Interface
-    if ($in_interface) {
-        $interface_section .= $line . "\n";
-    }
-    
-    // Собираем Peer
-    if ($in_peer) {
-        $peer_content .= $line . "\n";
-        
-        // Проверяем, соответствует ли ключ
-        if (preg_match('/PublicKey\s*=\s*' . preg_quote($peer_key, '/') . '/', $line)) {
-            $found_peer = true;
-        }
-        
-        // Конец секции Peer (пустая строка или начало новой секции)
-        if (trim($line) === "" || preg_match('/^\[/', $line)) {
-            if ($found_peer) {
-                // Формируем конфиг клиента
-                $client_config = $interface_section . "\n" . trim($peer_content) . "\n";
-                
-                // Отправляем как текстовый файл
-                header('Content-Type: text/plain');
-                header('Content-Disposition: attachment; filename="amneziawg-client-' . substr($peer_key, 0, 8) . '.conf"');
-                echo $client_config;
-                exit;
-            }
-            $in_peer = false;
-            $found_peer = false;
-        }
+// Ищем нужный peer
+$found_peer = null;
+for ($i = 1; $i < count($sections); $i++) {
+    $peer = '[Peer]' . $sections[$i];
+    if (strpos($peer, 'PublicKey = ' . $peer_key) !== false) {
+        $found_peer = $peer;
+        break;
     }
 }
 
-// Если не нашли peer
-http_response_code(404);
-die('Peer not found: ' . $peer_key);
+if ($found_peer) {
+    // Формируем конфиг клиента
+    $client_config = $interface . "\n" . $found_peer;
+    
+    // Очищаем лишние пустые строки
+    $client_config = preg_replace('/\n\s*\n/', "\n", $client_config);
+    
+    header('Content-Type: text/plain');
+    header('Content-Disposition: attachment; filename="amneziawg-client-' . substr($peer_key, 0, 8) . '.conf"');
+    echo $client_config;
+} else {
+    http_response_code(404);
+    die('Peer not found: ' . $peer_key);
+}
 ?>
 EOF
+
+chown www-data:www-data /var/www/amnezia-stats/get_config.php
+chmod 755 /var/www/amnezia-stats/get_config.php
 
 # Устанавливаем права
 chown www-data:www-data /var/www/amnezia-stats/get_config.php
