@@ -496,7 +496,6 @@ rm -f /etc/nginx/sites-enabled/default
 
 nginx -t && systemctl restart nginx
 echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
-
 #server {
 #    listen 9871 ssl http2;
 #    server_name $DOMAIN;
@@ -521,7 +520,6 @@ echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
 #        fastcgi_pass $PHP_FPM_SOCK;
 #    }
 #}
-
 server {
     listen 80;
     server_name $DOMAIN;
