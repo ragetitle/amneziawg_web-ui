@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================
-# AmneziaWG Monitor PRO - финальная версия
+# AmneziaWG Monitor PRO - исправленная версия
 # ============================================
 
 set -e
@@ -102,12 +102,11 @@ if (empty($config)) {
 
 $lines = explode("\n", $config);
 $interface_section = "";
-$peer_section = "";
+$peer_config = "";
 $in_interface = false;
 $in_peer = false;
-$found = false;
+$found_peer = false;
 
-// Собираем секцию Interface
 foreach ($lines as $line) {
     if (preg_match('/^\[Interface\]/', $line)) {
         $in_interface = true;
@@ -117,41 +116,35 @@ foreach ($lines as $line) {
     if ($in_interface) {
         if (preg_match('/^\[Peer\]/', $line)) {
             $in_interface = false;
-        } else {
-            $interface_section .= $line . "\n";
+            $in_peer = true;
+            $peer_config = "[Peer]\n";
+            continue;
         }
+        $interface_section .= $line . "\n";
     }
-}
-
-// Ищем нужного Peer
-foreach ($lines as $line) {
-    if (preg_match('/^\[Peer\]/', $line)) {
-        $in_peer = true;
-        $peer_section = "[Peer]\n";
-        continue;
-    }
+    
     if ($in_peer) {
-        $peer_section .= $line . "\n";
+        $peer_config .= $line . "\n";
         if (preg_match('/PublicKey\s*=\s*' . preg_quote($peer_key, '/') . '/', $line)) {
-            $found = true;
+            $found_peer = true;
         }
         if (trim($line) === "" || preg_match('/^\[/', $line)) {
-            if ($found) {
-                $client_config = $interface_section . "\n" . $peer_section;
+            if ($found_peer) {
+                $client_config = $interface_section . "\n" . $peer_config;
                 header('Content-Type: text/plain');
-                header('Content-Disposition: attachment; filename="amneziawg-client.conf"');
+                header('Content-Disposition: attachment; filename="amneziawg-client-' . substr($peer_key, 0, 8) . '.conf"');
                 echo $client_config;
                 exit;
             }
             $in_peer = false;
-            $peer_section = "";
-            $found = false;
+            $peer_config = "";
+            $found_peer = false;
         }
     }
 }
 
 http_response_code(404);
-die('Peer not found');
+die('Peer not found: ' . $peer_key);
 ?>
 EOF
 
@@ -167,7 +160,13 @@ EOF
 if [ ! -f "/var/www/amnezia-stats/peer_names.json" ]; then
     echo "{}" > /var/www/amnezia-stats/peer_names.json
 fi
-chmod 644 /var/www/amnezia-stats/*
+
+# Устанавливаем правильные права
+chown -R www-data:www-data /var/www/amnezia-stats
+chmod 755 /var/www/amnezia-stats
+chmod 664 /var/www/amnezia-stats/peer_names.json
+chmod 755 /var/www/amnezia-stats/*.php
+
 echo -e "${GREEN}✅ Обработчики созданы${NC}"
 
 # 7. Создаём генератор статистики
@@ -315,7 +314,8 @@ cat > /var/www/amnezia-stats/index.html << HTML
         @media (max-width:768px){th,td{padding:8px;font-size:0.75rem}.stat-number{font-size:1.8rem}.name-input{width:120px}}
     </style>
     <script>
-        let currentSort = 'ip';
+        let currentSort = '${SORT_TYPE}';
+        
         function editName(peerKey, currentName) {
             const cell = document.getElementById('name-cell-' + peerKey);
             cell.innerHTML = '<input type="text" id="name-input-' + peerKey + '" value="' + currentName.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '" class="name-input" onkeypress="if(event.key===\'Enter\') saveName(\'' + peerKey + '\')"> ' +
@@ -323,24 +323,49 @@ cat > /var/www/amnezia-stats/index.html << HTML
                 '<button class="save-btn" onclick="location.reload()">✖</button>';
             document.getElementById('name-input-' + peerKey).focus();
         }
+        
         function saveName(peerKey) {
             const newName = document.getElementById('name-input-' + peerKey).value.trim();
             if (!newName) return;
-            fetch('/save_name.php', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'peer='+encodeURIComponent(peerKey)+'&name='+encodeURIComponent(newName)})
-            .then(r=>r.text()).then(d=>{if(d==='ok')location.reload();else alert('Ошибка')}).catch(()=>alert('Ошибка'));
+            fetch('/save_name.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'peer=' + encodeURIComponent(peerKey) + '&name=' + encodeURIComponent(newName)
+            })
+            .then(r => r.text())
+            .then(d => {
+                if (d === 'ok') {
+                    location.reload();
+                } else {
+                    alert('Ошибка: ' + d);
+                }
+            })
+            .catch(e => {
+                console.error(e);
+                alert('Ошибка сохранения');
+            });
         }
-        function downloadConfig(peerKey){window.location.href='/get_config.php?peer='+encodeURIComponent(peerKey);}
+        
+        function downloadConfig(peerKey) {
+            window.location.href = '/get_config.php?peer=' + encodeURIComponent(peerKey);
+        }
+        
         function sortBy(type) {
             currentSort = type;
             fetch('/sort.php?type=' + type)
                 .then(() => location.reload())
-                .catch(() => location.reload());
+                .catch(e => {
+                    console.error(e);
+                    location.reload();
+                });
         }
+        
         function updateSortIndicator() {
             document.querySelectorAll('.sort-indicator').forEach(el => el.textContent = '');
             const indicator = document.getElementById('sort-indicator-' + currentSort);
             if (indicator) indicator.textContent = ' ▼';
         }
+        
         window.onload = updateSortIndicator;
     </script>
 </head>
@@ -474,6 +499,9 @@ systemctl restart cron
 # 10. Запускаем
 echo -e "\n${YELLOW}[10/10] Запуск...${NC}"
 /usr/local/bin/gen_stats.sh
+
+# Перезапускаем PHP-FPM для применения прав
+systemctl restart php8.1-fpm
 
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
