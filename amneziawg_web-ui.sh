@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================
-# AmneziaWG Monitor PRO - порт 9871 + сортировка
+# AmneziaWG Monitor PRO - финальная версия
 # ============================================
 
 set -e
@@ -12,84 +12,55 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}AmneziaWG Monitor PRO (порт 9871)${NC}"
+echo -e "${GREEN}AmneziaWG Monitor PRO${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 # Запрашиваем данные
-#echo -e "\n${YELLOW}Настройка авторизации:${NC}"
-#read -p "Введите логин для доступа к панели [admin]: " AUTH_USER
-#AUTH_USER=${AUTH_USER:-admin}
+echo -e "\n${YELLOW}Настройка авторизации:${NC}"
+read -p "Введите логин для доступа к панели [admin]: " AUTH_USER
+AUTH_USER=${AUTH_USER:-admin}
 
-#read -sp "Введите пароль для доступа к панели: " AUTH_PASS
-#echo ""
-#if [ -z "$AUTH_PASS" ]; then
-#    AUTH_PASS=$(openssl rand -base64 12)
-#   echo -e "${YELLOW}Пароль сгенерирован: ${GREEN}$AUTH_PASS${NC}"
-#fi
-
-#echo -e "\n${YELLOW}Настройка SSL (Let's Encrypt):${NC}"
-#read -p "Введите доменное имя (например, vpn.example.com): " DOMAIN
-#if [ -z "$DOMAIN" ]; then
-#    echo -e "${RED}Домен обязателен для SSL!${NC}"
-#    exit 1
-#fi
-
-#read -p "Введите email для Let's Encrypt: " SSL_EMAIL
-#if [ -z "$SSL_EMAIL" ]; then
-#    echo -e "${RED}Email обязателен для Let's Encrypt!${NC}"
-#    exit 1
-#fi
+read -sp "Введите пароль для доступа к панели: " AUTH_PASS
+echo ""
+if [ -z "$AUTH_PASS" ]; then
+    AUTH_PASS=$(openssl rand -base64 12)
+    echo -e "${YELLOW}Пароль сгенерирован: ${GREEN}$AUTH_PASS${NC}"
+fi
 
 # 1. Проверяем контейнер
-echo -e "\n${YELLOW}[1/11] Проверка контейнера amnezia-awg...${NC}"
+echo -e "\n${YELLOW}[1/10] Проверка контейнера amnezia-awg...${NC}"
 if ! docker ps | grep -q "amnezia-awg"; then
     echo -e "${RED}❌ Контейнер amnezia-awg не запущен!${NC}"
     exit 1
 fi
 echo -e "${GREEN}✅ Контейнер amnezia-awg запущен${NC}"
 
-# 2. Определяем порт AmneziaWG
-echo -e "\n${YELLOW}[2/11] Определение порта AmneziaWG...${NC}"
+# 2. Определяем порт
+echo -e "\n${YELLOW}[2/10] Определение порта AmneziaWG...${NC}"
 WG_PORT=$(docker exec amnezia-awg cat /opt/amnezia/awg/wg0.conf 2>/dev/null | grep "^ListenPort" | awk '{print $3}')
 [ -z "$WG_PORT" ] && WG_PORT=$(docker exec amnezia-awg wg show 2>/dev/null | grep "listening port:" | awk '{print $3}')
 [ -z "$WG_PORT" ] && WG_PORT="42441"
 echo -e "${GREEN}✅ Обнаружен порт: $WG_PORT${NC}"
 
 # 3. Устанавливаем зависимости
-echo -e "\n${YELLOW}[3/11] Установка зависимостей...${NC}"
-apt update && apt install -y cron
-apt update && apt install -y php8.1-fpm
-#apt install -y nginx php-fpm certbot python3-certbot-nginx apache2-utils jq curl
+echo -e "\n${YELLOW}[3/10] Установка зависимостей...${NC}"
+apt update
+apt install -y nginx php8.1-fpm apache2-utils jq curl cron bc
 echo -e "${GREEN}✅ Зависимости установлены${NC}"
 
 # 4. Создаём директории
-echo -e "\n${YELLOW}[4/11] Создание директорий...${NC}"
+echo -e "\n${YELLOW}[4/10] Создание директорий...${NC}"
 mkdir -p /var/www/amnezia-stats
 mkdir -p /usr/local/bin
 echo -e "${GREEN}✅ Директории созданы${NC}"
 
-# 5. Создаём файл авторизации
-echo -e "\n${YELLOW}[5/11] Настройка авторизации...${NC}"
+# 5. Настраиваем авторизацию
+echo -e "\n${YELLOW}[5/10] Настройка авторизации...${NC}"
 htpasswd -bc /etc/nginx/.htpasswd "$AUTH_USER" "$AUTH_PASS"
 echo -e "${GREEN}✅ Авторизация настроена${NC}"
 
-# 6. Определяем PHP-FPM сокет
-echo -e "\n${YELLOW}[6/11] Определение PHP-FPM...${NC}"
-PHP_FPM_SOCK=""
-for version in 8.2 8.1 8.0 7.4; do
-    if [ -f "/var/run/php/php${version}-fpm.sock" ]; then
-        PHP_FPM_SOCK="unix:/var/run/php/php${version}-fpm.sock"
-        break
-    elif systemctl is-active --quiet php${version}-fpm 2>/dev/null; then
-        PHP_FPM_SOCK="unix:/var/run/php/php${version}-fpm.sock"
-        break
-    fi
-done
-[ -z "$PHP_FPM_SOCK" ] && PHP_FPM_SOCK="127.0.0.1:9000"
-echo -e "${GREEN}✅ PHP-FPM: $PHP_FPM_SOCK${NC}"
-
-# 7. Создаём PHP обработчики
-echo -e "\n${YELLOW}[7/11] Создание обработчиков...${NC}"
+# 6. Создаём PHP обработчики
+echo -e "\n${YELLOW}[6/10] Создание обработчиков...${NC}"
 
 cat > /var/www/amnezia-stats/save_name.php << 'EOF'
 <?php
@@ -122,15 +93,37 @@ if (empty($peer_key)) {
     http_response_code(400);
     die('Peer key required');
 }
+
 $config = shell_exec("docker exec amnezia-awg cat /opt/amnezia/awg/wg0.conf 2>/dev/null");
 if (empty($config)) {
     http_response_code(500);
     die('Cannot read config');
 }
+
 $lines = explode("\n", $config);
+$interface_section = "";
 $peer_section = "";
+$in_interface = false;
 $in_peer = false;
 $found = false;
+
+// Собираем секцию Interface
+foreach ($lines as $line) {
+    if (preg_match('/^\[Interface\]/', $line)) {
+        $in_interface = true;
+        $interface_section = "[Interface]\n";
+        continue;
+    }
+    if ($in_interface) {
+        if (preg_match('/^\[Peer\]/', $line)) {
+            $in_interface = false;
+        } else {
+            $interface_section .= $line . "\n";
+        }
+    }
+}
+
+// Ищем нужного Peer
 foreach ($lines as $line) {
     if (preg_match('/^\[Peer\]/', $line)) {
         $in_peer = true;
@@ -144,11 +137,10 @@ foreach ($lines as $line) {
         }
         if (trim($line) === "" || preg_match('/^\[/', $line)) {
             if ($found) {
-                $interface = shell_exec("docker exec amnezia-awg cat /opt/amnezia/awg/wg0.conf 2>/dev/null | grep -A 20 '^\[Interface\]' | head -20");
-                $full_config = $interface . "\n" . $peer_section;
+                $client_config = $interface_section . "\n" . $peer_section;
                 header('Content-Type: text/plain');
                 header('Content-Disposition: attachment; filename="amneziawg-client.conf"');
-                echo $full_config;
+                echo $client_config;
                 exit;
             }
             $in_peer = false;
@@ -157,22 +149,29 @@ foreach ($lines as $line) {
         }
     }
 }
+
 http_response_code(404);
 die('Peer not found');
 ?>
 EOF
 
-chmod 644 /var/www/amnezia-stats/save_name.php
-chmod 644 /var/www/amnezia-stats/get_config.php
+cat > /var/www/amnezia-stats/sort.php << 'EOF'
+<?php
+$type = isset($_GET['type']) ? $_GET['type'] : 'ip';
+file_put_contents(__DIR__ . '/sort.txt', $type);
+header('Content-Type: application/json');
+echo json_encode(['status' => 'ok']);
+?>
+EOF
 
 if [ ! -f "/var/www/amnezia-stats/peer_names.json" ]; then
     echo "{}" > /var/www/amnezia-stats/peer_names.json
 fi
-chmod 644 /var/www/amnezia-stats/peer_names.json
+chmod 644 /var/www/amnezia-stats/*
 echo -e "${GREEN}✅ Обработчики созданы${NC}"
 
-# 8. Создаём генератор статистики с сортировкой
-echo -e "\n${YELLOW}[8/11] Создание генератора статистики (с сортировкой)...${NC}"
+# 7. Создаём генератор статистики
+echo -e "\n${YELLOW}[7/10] Создание генератора статистики...${NC}"
 cat > /usr/local/bin/gen_stats.sh << 'EOF'
 #!/bin/bash
 
@@ -185,33 +184,31 @@ WG_PORT=$(docker exec amnezia-awg cat /opt/amnezia/awg/wg0.conf 2>/dev/null | gr
 INTERFACE_INFO=$(echo "$WG_OUTPUT" | head -13)
 
 # Загружаем имена
-NAMES_FILE="/var/www/amnezia-stats/peer_names.json"
 declare -A PEER_NAMES
-if [ -f "$NAMES_FILE" ] && command -v jq >/dev/null; then
+if [ -f "/var/www/amnezia-stats/peer_names.json" ] && command -v jq >/dev/null; then
     while IFS= read -r line; do
         key=$(echo "$line" | cut -d: -f1)
         name=$(echo "$line" | cut -d: -f2-)
         PEER_NAMES["$key"]="$name"
-    done < <(jq -r 'to_entries | .[] | "\(.key):\(.value)"' "$NAMES_FILE" 2>/dev/null)
+    done < <(jq -r 'to_entries | .[] | "\(.key):\(.value)"' /var/www/amnezia-stats/peer_names.json 2>/dev/null)
 fi
 
-# Парсим всех клиентов в массив
+# Парсим клиентов
 CLIENTS=()
 CURRENT_PEER=""
-PEER_IP=""
-PEER_ENDPOINT=""
-PEER_RX=""
-PEER_TX=""
-PEER_HANDSHAKE=""
+PEER_IP="—"
+PEER_ENDPOINT="—"
+PEER_RX="—"
+PEER_TX="—"
+PEER_HANDSHAKE="никогда"
 
 while IFS= read -r line; do
     if [[ "$line" =~ ^peer:\ (.+)$ ]]; then
         if [ -n "$CURRENT_PEER" ]; then
-            # Добавляем клиента в массив
             CLIENTS+=("$CURRENT_PEER|$PEER_IP|$PEER_ENDPOINT|$PEER_RX|$PEER_TX|$PEER_HANDSHAKE")
         fi
         CURRENT_PEER="${BASH_REMATCH[1]}"
-        PEER_IP="—"; PEER_ENDPOINT="—"; PEER_RX="0"; PEER_TX="0"; PEER_HANDSHAKE="никогда"
+        PEER_IP="—"; PEER_ENDPOINT="—"; PEER_RX="—"; PEER_TX="—"; PEER_HANDSHAKE="никогда"
     elif [ -n "$CURRENT_PEER" ]; then
         [[ "$line" =~ allowed\ ips:\ ([0-9./]+) ]] && PEER_IP="${BASH_REMATCH[1]}"
         [[ "$line" =~ endpoint:\ (.+) ]] && PEER_ENDPOINT="${BASH_REMATCH[1]}"
@@ -219,21 +216,11 @@ while IFS= read -r line; do
         [[ "$line" =~ latest\ handshake:\ (.+) ]] && PEER_HANDSHAKE="${BASH_REMATCH[1]}"
     fi
 done <<< "$WG_OUTPUT"
-
-# Добавляем последнего
 if [ -n "$CURRENT_PEER" ]; then
     CLIENTS+=("$CURRENT_PEER|$PEER_IP|$PEER_ENDPOINT|$PEER_RX|$PEER_TX|$PEER_HANDSHAKE")
 fi
 
-# Функция для конвертации IP в число для сортировки
-ip_to_int() {
-    local ip="${1%/*}"
-    local a b c d
-    IFS=. read -r a b c d <<< "$ip"
-    echo $((a * 256**3 + b * 256**2 + c * 256 + d))
-}
-
-# Функция для конвертации размера в байты
+# Функция конвертации размера в байты
 bytes_to_int() {
     local size="$1"
     if [[ "$size" =~ ([0-9.]+)[[:space:]]*([KMGT]?B?) ]]; then
@@ -243,7 +230,6 @@ bytes_to_int() {
             KB|K) echo "$val * 1024" | bc | cut -d. -f1 ;;
             MB|M) echo "$val * 1048576" | bc | cut -d. -f1 ;;
             GB|G) echo "$val * 1073741824" | bc | cut -d. -f1 ;;
-            TB|T) echo "$val * 1099511627776" | bc | cut -d. -f1 ;;
             *) echo "$val" ;;
         esac
     else
@@ -251,34 +237,29 @@ bytes_to_int() {
     fi
 }
 
-# Сортировка по IP (по умолчанию)
-sort_peers_by_ip() {
-    printf '%s\n' "${CLIENTS[@]}" | sort -t'|' -k2 -V
-}
-
-# Сортировка по полученным байтам (RX)
-sort_peers_by_rx() {
+# Сортировки
+sort_by_ip() { printf '%s\n' "${CLIENTS[@]}" | sort -t'|' -k2 -V; }
+sort_by_rx() {
     printf '%s\n' "${CLIENTS[@]}" | while IFS='|' read -r key ip ep rx tx hs; do
-        rx_bytes=$(bytes_to_int "$rx")
-        echo "$rx_bytes|$key|$ip|$ep|$rx|$tx|$hs"
+        echo "$(bytes_to_int "$rx")|$key|$ip|$ep|$rx|$tx|$hs"
+    done | sort -t'|' -k1 -rn | cut -d'|' -f2-
+}
+sort_by_tx() {
+    printf '%s\n' "${CLIENTS[@]}" | while IFS='|' read -r key ip ep rx tx hs; do
+        echo "$(bytes_to_int "$tx")|$key|$ip|$ep|$rx|$tx|$hs"
     done | sort -t'|' -k1 -rn | cut -d'|' -f2-
 }
 
-# Сортировка по отправленным байтам (TX)
-sort_peers_by_tx() {
-    printf '%s\n' "${CLIENTS[@]}" | while IFS='|' read -r key ip ep rx tx hs; do
-        tx_bytes=$(bytes_to_int "$tx")
-        echo "$tx_bytes|$key|$ip|$ep|$rx|$tx|$hs"
-    done | sort -t'|' -k1 -rn | cut -d'|' -f2-
-}
+# Читаем сохранённый тип сортировки
+SORT_FILE="/var/www/amnezia-stats/sort.txt"
+SORT_TYPE="ip"
+[ -f "$SORT_FILE" ] && SORT_TYPE=$(cat "$SORT_FILE")
 
-# По умолчанию сортировка по IP
-SORT_TYPE="${1:-ip}"
 case "$SORT_TYPE" in
-    ip)   SORTED_CLIENTS=$(sort_peers_by_ip) ;;
-    rx)   SORTED_CLIENTS=$(sort_peers_by_rx) ;;
-    tx)   SORTED_CLIENTS=$(sort_peers_by_tx) ;;
-    *)    SORTED_CLIENTS=$(sort_peers_by_ip) ;;
+    ip) SORTED_CLIENTS=$(sort_by_ip) ;;
+    rx) SORTED_CLIENTS=$(sort_by_rx) ;;
+    tx) SORTED_CLIENTS=$(sort_by_tx) ;;
+    *)  SORTED_CLIENTS=$(sort_by_ip) ;;
 esac
 
 # Считаем активных
@@ -455,21 +436,8 @@ EOF
 chmod +x /usr/local/bin/gen_stats.sh
 echo -e "${GREEN}✅ Генератор статистики создан${NC}"
 
-# 9. Создаём обработчик сортировки
-echo -e "\n${YELLOW}[9/11] Создание обработчика сортировки...${NC}"
-cat > /var/www/amnezia-stats/sort.php << 'EOF'
-<?php
-$type = isset($_GET['type']) ? $_GET['type'] : 'ip';
-setcookie('amnezia_sort', $type, time() + 86400 * 30, '/');
-echo 'ok';
-?>
-EOF
-chmod 644 /var/www/amnezia-stats/sort.php
-
-# 10. Настраиваем Nginx на порт 9871 (без SSL)
-echo -e "\n${YELLOW}[10/11] Настройка Nginx на порт 9871...${NC}"
-
-# Экранируем переменные для Nginx, но подставляем значение PHP_FPM_SOCK
+# 8. Настраиваем Nginx
+echo -e "\n${YELLOW}[8/10] Настройка Nginx...${NC}"
 cat > /etc/nginx/sites-available/amnezia-stats << EOF
 server {
     listen 9871;
@@ -485,57 +453,34 @@ server {
         try_files \$uri \$uri/ =404;
     }
 
-    location ~ \\.php\$ {
+    location ~ \.php$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass ${PHP_FPM_SOCK};
+        fastcgi_pass unix:/var/run/php/php8.1-fpm.sock;
     }
 }
 EOF
 
 ln -sf /etc/nginx/sites-available/amnezia-stats /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
-
 nginx -t && systemctl restart nginx
 echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
 
-ln -sf /etc/nginx/sites-available/amnezia-stats /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-
-nginx -t && systemctl restart nginx
-echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
-
-# 11. Получаем SSL сертификат
-#echo -e "\n${YELLOW}[11/11] Получение SSL сертификата...${NC}"
-#certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$SSL_EMAIL" || {
-#    echo -e "${RED}⚠️ Не удалось получить SSL сертификат${NC}"
-#    echo -e "${YELLOW}Проверьте, что домен $DOMAIN указывает на этот сервер и порт 80 открыт${NC}"
-#}
-
-# Настройка cron
+# 9. Настраиваем cron
+echo -e "\n${YELLOW}[9/10] Настройка автообновления...${NC}"
 (crontab -l 2>/dev/null | grep -v gen_stats.sh; echo "* * * * * /usr/local/bin/gen_stats.sh") | crontab -
 (crontab -l 2>/dev/null | grep -v "sleep 30"; echo "* * * * * sleep 30; /usr/local/bin/gen_stats.sh") | crontab -
+systemctl restart cron
 
-# Запускаем генерацию
+# 10. Запускаем
+echo -e "\n${YELLOW}[10/10] Запуск...${NC}"
 /usr/local/bin/gen_stats.sh
 
-# Итог
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 echo -e "\n${GREEN}========================================${NC}"
 echo -e "${GREEN}✅ УСТАНОВКА ЗАВЕРШЕНА!${NC}"
 echo -e "${GREEN}========================================${NC}"
-echo -e ""
-#echo -e "${YELLOW}🌐 Панель доступна по адресу:${NC}"
-#echo -e "${GREEN}   https://${DOMAIN}:9871${NC}"
-echo -e "${YELLOW}   или https://${SERVER_IP}:9871 (если SSL не настроен)${NC}"
-echo -e ""
-echo -e "${YELLOW}🔑 Данные для входа:${NC}"
-echo -e "   • Логин: ${GREEN}$AUTH_USER${NC}"
-echo -e "   • Пароль: ${GREEN}$AUTH_PASS${NC}"
-echo -e ""
-echo -e "${YELLOW}📊 Сортировка:${NC}"
-echo -e "   • Клик по заголовку 'IP адрес' — сортировка по IP"
-echo -e "   • Клик по 'Получено' — сортировка по скачанному трафику"
-echo -e "   • Клик по 'Отправлено' — сортировка по отправленному трафику"
-echo -e ""
-echo -e "${GREEN}========================================${NC}"
+echo -e "\n${YELLOW}🌐 Панель:${NC} ${GREEN}http://${SERVER_IP}:9871${NC}"
+echo -e "${YELLOW}🔑 Логин:${NC} ${GREEN}$AUTH_USER${NC}"
+echo -e "${YELLOW}🔑 Пароль:${NC} ${GREEN}$AUTH_PASS${NC}"
+echo -e "\n${GREEN}========================================${NC}"
