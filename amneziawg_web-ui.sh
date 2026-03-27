@@ -492,9 +492,21 @@ echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
 
 # 9. Настраиваем cron
 echo -e "\n${YELLOW}[9/10] Настройка автообновления...${NC}"
-(crontab -l 2>/dev/null | grep -v gen_stats.sh; echo "* * * * * /usr/local/bin/gen_stats.sh") | crontab -
-(crontab -l 2>/dev/null | grep -v "sleep 30"; echo "* * * * * sleep 30; /usr/local/bin/gen_stats.sh") | crontab -
-systemctl restart cron
+
+# Очищаем старые задачи (если были)
+crontab -l 2>/dev/null | grep -v gen_stats.sh | crontab - 2>/dev/null || true
+
+# Добавляем задачу на каждую минуту (в 00 секунд)
+(crontab -l 2>/dev/null; echo "* * * * * /usr/local/bin/gen_stats.sh >> /var/log/amnezia-stats.log 2>&1") | crontab -
+
+# Добавляем задачу с задержкой 30 секунд
+(crontab -l 2>/dev/null; echo "* * * * * sleep 30; /usr/local/bin/gen_stats.sh >> /var/log/amnezia-stats.log 2>&1") | crontab -
+
+# Создаем лог-файл с правильными правами
+touch /var/log/amnezia-stats.log
+chmod 666 /var/log/amnezia-stats.log
+
+echo -e "${GREEN}✅ Cron настроен (обновление данных каждые 30 секунд)${NC}"
 
 # 10. Запускаем
 echo -e "\n${YELLOW}[10/10] Запуск...${NC}"
