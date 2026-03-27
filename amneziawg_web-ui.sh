@@ -497,30 +497,30 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl restart nginx
 echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
 
-server {
-    listen 9871 ssl http2;
-    server_name $DOMAIN;
-
-    root /var/www/amnezia-stats;
-    index index.html index.php;
-
-    auth_basic "AmneziaWG Monitor";
-    auth_basic_user_file /etc/nginx/.htpasswd;
-
-    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    location / {
-        try_files \$uri \$uri/ =404;
-    }
-
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass $PHP_FPM_SOCK;
-    }
-}
+#server {
+#    listen 9871 ssl http2;
+#    server_name $DOMAIN;
+#
+#    root /var/www/amnezia-stats;
+#    index index.html index.php;
+#
+#    auth_basic "AmneziaWG Monitor";
+#    auth_basic_user_file /etc/nginx/.htpasswd;
+#
+#    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+#    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+#    ssl_protocols TLSv1.2 TLSv1.3;
+#    ssl_ciphers HIGH:!aNULL:!MD5;
+#
+#   location / {
+#        try_files \$uri \$uri/ =404;
+#    }
+#
+#    location ~ \.php$ {
+#        include snippets/fastcgi-php.conf;
+#        fastcgi_pass $PHP_FPM_SOCK;
+#    }
+#}
 
 server {
     listen 80;
