@@ -156,6 +156,8 @@ chown -R www-data:www-data /var/www/amnezia-stats
 chmod 755 /var/www/amnezia-stats
 chmod 664 /var/www/amnezia-stats/peer_names.json
 chmod 755 /var/www/amnezia-stats/*.php
+usermod -aG docker www-data
+systemctl restart php8.1-fpm
 
 echo -e "${GREEN}✅ Обработчики созданы${NC}"
 
