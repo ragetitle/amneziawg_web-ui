@@ -94,6 +94,7 @@ if (empty($peer_key)) {
     die('Peer key required');
 }
 
+// Получаем конфиг из контейнера
 $config = shell_exec("docker exec amnezia-awg cat /opt/amnezia/awg/wg0.conf 2>/dev/null");
 if (empty($config)) {
     http_response_code(500);
@@ -107,7 +108,7 @@ $in_interface = false;
 $in_peer = false;
 $found = false;
 
-// Собираем секцию Interface
+// Собираем секцию Interface (параметры сервера)
 foreach ($lines as $line) {
     if (preg_match('/^\[Interface\]/', $line)) {
         $in_interface = true;
@@ -137,6 +138,7 @@ foreach ($lines as $line) {
         }
         if (trim($line) === "" || preg_match('/^\[/', $line)) {
             if ($found) {
+                // Формируем конфиг для клиента
                 $client_config = $interface_section . "\n" . $peer_section;
                 header('Content-Type: text/plain');
                 header('Content-Disposition: attachment; filename="amneziawg-client.conf"');
@@ -279,140 +281,43 @@ cat > /var/www/amnezia-stats/index.html << HTML
     <meta charset="UTF-8">
     <meta http-equiv="refresh" content="30">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AmneziaWG VPN Статистика</title>
+    <title>AmneziaWG VPN</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', 'Monaco', monospace;
-            background: linear-gradient(135deg, #0a0e1a 0%, #0f1422 100%);
-            color: #e4e4e7;
-            padding: 20px;
-            min-height: 100vh;
-        }
-        .container { max-width: 1400px; margin: 0 auto; }
-        h1 {
-            font-size: 2rem;
-            background: linear-gradient(135deg, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            margin-bottom: 10px;
-        }
-        .timestamp { color: #6b7280; margin-bottom: 30px; font-size: 0.9rem; }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .stat-card {
-            background: rgba(17, 24, 39, 0.8);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(96, 165, 250, 0.2);
-            border-radius: 16px;
-            padding: 20px;
-        }
-        .stat-label { font-size: 0.85rem; text-transform: uppercase; color: #94a3b8; margin-bottom: 10px; }
-        .stat-number { font-size: 2.5rem; font-weight: bold; color: #60a5fa; }
-        h2 { font-size: 1.3rem; color: #60a5fa; margin: 30px 0 20px 0; padding-bottom: 10px; border-bottom: 1px solid #1f2937; }
-        .interface-info {
-            background: #111827;
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 30px;
-            border: 1px solid #1f2937;
-            overflow-x: auto;
-        }
-        .interface-info pre { margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #111827;
-            border-radius: 16px;
-            overflow: hidden;
-        }
-        th {
-            background: #1f2a3e;
-            padding: 14px 12px;
-            text-align: left;
-            color: #94a3b8;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            cursor: pointer;
-        }
-        th:hover { background: #2d3a4e; }
-        td {
-            padding: 12px;
-            border-bottom: 1px solid #1f2937;
-            font-size: 0.85rem;
-        }
-        tr:hover { background: #1a2538; }
-        .status-online { color: #4ade80; font-weight: bold; }
-        .status-offline { color: #f87171; }
-        .status-idle { color: #fbbf24; }
-        .peer-key { font-family: monospace; font-size: 11px; background: #1f2937; padding: 2px 6px; border-radius: 6px; }
-        .editable-name {
-            cursor: pointer;
-            background: #1f2937;
-            padding: 4px 8px;
-            border-radius: 6px;
-            display: inline-block;
-            transition: background 0.2s;
-        }
-        .editable-name:hover { background: #374151; }
-        .download-btn {
-            background: #3b82f6;
-            border: none;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.75rem;
-        }
-        .download-btn:hover { background: #2563eb; }
-        .name-input {
-            background: #0f1422;
-            border: 1px solid #60a5fa;
-            color: #e4e4e7;
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-family: inherit;
-            font-size: 0.85rem;
-            width: 180px;
-        }
-        .save-btn {
-            background: #60a5fa;
-            border: none;
-            color: #0a0e1a;
-            padding: 4px 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            margin-left: 5px;
-            font-size: 0.75rem;
-        }
-        .footer {
-            margin-top: 40px;
-            padding-top: 20px;
-            text-align: center;
-            color: #6b7280;
-            font-size: 0.75rem;
-            border-top: 1px solid #1f2937;
-        }
-        .note {
-            background: #1f2a3e;
-            padding: 10px 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            font-size: 0.8rem;
-            color: #94a3b8;
-        }
-        @media (max-width: 768px) {
-            th, td { padding: 8px; font-size: 0.75rem; }
-            .stat-number { font-size: 1.8rem; }
-            .name-input { width: 120px; }
-        }
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:linear-gradient(135deg,#0a0e1a,#0f1422);color:#e4e4e7;font-family:'Segoe UI',monospace;padding:20px}
+        .container{max-width:1400px;margin:0 auto}
+        h1{font-size:2rem;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:10px}
+        .timestamp{color:#6b7280;margin-bottom:30px}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin-bottom:30px}
+        .stat-card{background:rgba(17,24,39,0.8);backdrop-filter:blur(10px);border:1px solid rgba(96,165,250,0.2);border-radius:16px;padding:20px}
+        .stat-label{font-size:0.85rem;text-transform:uppercase;color:#94a3b8;margin-bottom:10px}
+        .stat-number{font-size:2.5rem;font-weight:bold;color:#60a5fa}
+        h2{font-size:1.3rem;color:#60a5fa;margin:30px 0 20px;padding-bottom:10px;border-bottom:1px solid #1f2937}
+        .interface-info{background:#111827;border-radius:16px;padding:20px;margin-bottom:30px;border:1px solid #1f2937}
+        .interface-info pre{margin:0;font-size:12px;white-space:pre-wrap}
+        table{width:100%;border-collapse:collapse;background:#111827;border-radius:16px;overflow:hidden}
+        th{background:#1f2a3e;padding:14px 12px;text-align:left;color:#94a3b8;font-size:0.85rem;text-transform:uppercase;cursor:pointer}
+        th:hover{background:#2d3a4e}
+        td{padding:12px;border-bottom:1px solid #1f2937;font-size:0.85rem}
+        tr:hover{background:#1a2538}
+        .status-online{color:#4ade80;font-weight:bold}
+        .status-offline{color:#f87171}
+        .status-idle{color:#fbbf24}
+        .peer-key{font-family:monospace;font-size:11px;background:#1f2937;padding:2px 6px;border-radius:6px}
+        .editable-name{cursor:pointer;background:#1f2937;padding:4px 8px;border-radius:6px;display:inline-block;transition:background 0.2s}
+        .editable-name:hover{background:#374151}
+        .download-btn{background:#3b82f6;border:none;color:white;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:0.75rem;text-decoration:none;display:inline-block}
+        .download-btn:hover{background:#2563eb}
+        .name-input{background:#0f1422;border:1px solid #60a5fa;color:#e4e4e7;padding:4px 8px;border-radius:6px;font-family:inherit;font-size:0.85rem;width:180px}
+        .save-btn{background:#60a5fa;border:none;color:#0a0e1a;padding:4px 8px;border-radius:6px;cursor:pointer;margin-left:5px;font-size:0.75rem}
+        .save-btn:hover{background:#3b82f6}
+        .footer{margin-top:40px;padding-top:20px;text-align:center;color:#6b7280;font-size:0.75rem;border-top:1px solid #1f2937}
+        .note{background:#1f2a3e;padding:10px 15px;border-radius:8px;margin-top:20px;font-size:0.8rem;color:#94a3b8}
+        .sort-indicator{font-size:0.7rem;margin-left:5px}
+        @media (max-width:768px){th,td{padding:8px;font-size:0.75rem}.stat-number{font-size:1.8rem}.name-input{width:120px}}
     </style>
     <script>
+        let currentSort = 'ip';
         function editName(peerKey, currentName) {
             const cell = document.getElementById('name-cell-' + peerKey);
             cell.innerHTML = '<input type="text" id="name-input-' + peerKey + '" value="' + currentName.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '" class="name-input" onkeypress="if(event.key===\'Enter\') saveName(\'' + peerKey + '\')"> ' +
@@ -426,14 +331,19 @@ cat > /var/www/amnezia-stats/index.html << HTML
             fetch('/save_name.php', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'peer='+encodeURIComponent(peerKey)+'&name='+encodeURIComponent(newName)})
             .then(r=>r.text()).then(d=>{if(d==='ok')location.reload();else alert('Ошибка')}).catch(()=>alert('Ошибка'));
         }
-        function downloadConfig(peerKey) {
-            window.location.href = '/get_config.php?peer=' + encodeURIComponent(peerKey);
-        }
+        function downloadConfig(peerKey){window.location.href='/get_config.php?peer='+encodeURIComponent(peerKey);}
         function sortBy(type) {
+            currentSort = type;
             fetch('/sort.php?type=' + type)
                 .then(() => location.reload())
                 .catch(() => location.reload());
         }
+        function updateSortIndicator() {
+            document.querySelectorAll('.sort-indicator').forEach(el => el.textContent = '');
+            const indicator = document.getElementById('sort-indicator-' + currentSort);
+            if (indicator) indicator.textContent = ' ▼';
+        }
+        window.onload = updateSortIndicator;
     </script>
 </head>
 <body>
@@ -452,19 +362,19 @@ cat > /var/www/amnezia-stats/index.html << HTML
 
     <h2>👥 Подключения клиентов</h2>
     <div style="overflow-x: auto;">
-        表
+        <table>
             <thead>
                 <tr>
-                    <th onclick="sortBy('ip')">Имя</th>
-                    <th>Статус</th>
-                    <th onclick="sortBy('ip')">IP адрес</th>
+                    <th onclick="sortBy('ip')">Имя <span id="sort-indicator-ip" class="sort-indicator"></span></th>
+                    <th onclick="sortBy('ip')">Статус</th>
+                    <th onclick="sortBy('ip')">IP адрес <span id="sort-indicator-ip" class="sort-indicator"></span></th>
                     <th>Публичный ключ</th>
                     <th>Endpoint</th>
-                    <th onclick="sortBy('rx')">Получено</th>
-                    <th onclick="sortBy('tx')">Отправлено</th>
-                    <th>Последний handshake</th>
+                    <th onclick="sortBy('rx')">Получено <span id="sort-indicator-rx" class="sort-indicator"></span></th>
+                    <th onclick="sortBy('tx')">Отправлено <span id="sort-indicator-tx" class="sort-indicator"></span></th>
+                    <th>Handshake</th>
                     <th>Конфиг</th>
-                 </tr>
+                </tr>
             </thead>
             <tbody>
 HTML
@@ -473,7 +383,7 @@ HTML
 while IFS='|' read -r peer_key peer_ip peer_ep peer_rx peer_tx peer_hs; do
     peer_name="${PEER_NAMES[$peer_key]}"
     [ -z "$peer_name" ] && peer_name="${peer_key:0:16}..."
-
+    
     if [[ "$peer_hs" =~ [0-9]+[[:space:]]*seconds? ]]; then
         status="🟢 онлайн"
         status_class="status-online"
@@ -484,25 +394,25 @@ while IFS='|' read -r peer_key peer_ip peer_ep peer_rx peer_tx peer_hs; do
         status="⚫ офлайн"
         status_class="status-offline"
     fi
-
-    echo "汽
-        <td id=\"name-cell-${peer_key}\"><span class=\"editable-name\" onclick=\"editName('${peer_key}', '${peer_name//\'/\\\'}')\">📝 ${peer_name}</span>刷
-        <td class=\"$status_class\">$status刷
-        <td><code>${peer_ip:-—}</code>刷
-        <td><span class=\"peer-key\">${peer_key:0:32}...</span>刷
-        <td>${peer_ep:-—}刷
-        <td>${peer_rx:-0}刷
-        <td>${peer_tx:-0}刷
-        <td>${peer_hs:-никогда}刷
-        <td><button class=\"download-btn\" onclick=\"downloadConfig('${peer_key}')\">📥 Конфиг</button>刷
+    
+    echo "<tr>
+        <td id=\"name-cell-${peer_key}\"><span class=\"editable-name\" onclick=\"editName('${peer_key}', '${peer_name//\'/\\\'}')\">📝 ${peer_name}</span></td>
+        <td class=\"$status_class\">$status</td>
+        <td><code>${peer_ip:-—}</code></td>
+        <td><span class=\"peer-key\">${peer_key:0:32}...</span></td>
+        <td>${peer_ep:-—}</td>
+        <td>${peer_rx:-0}</td>
+        <td>${peer_tx:-0}</td>
+        <td>${peer_hs:-никогда}</td>
+        <td><button class=\"download-btn\" onclick=\"downloadConfig('${peer_key}')\">📥 Конфиг</button></td>
     </tr>" >> /var/www/amnezia-stats/index.html
 done <<< "$SORTED_CLIENTS"
 
 cat >> /var/www/amnezia-stats/index.html << HTML
             </tbody>
-        表
+        </table>
     </div>
-
+    
     <div class="note">
         💡 <strong>Примечание:</strong>
         <ul style="margin-left: 20px; margin-top: 5px;">
