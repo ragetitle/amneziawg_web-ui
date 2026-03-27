@@ -520,12 +520,12 @@ echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
 #        fastcgi_pass $PHP_FPM_SOCK;
 #    }
 #}
-server {
-    listen 80;
-    server_name $DOMAIN;
-    return 301 https://\$server_name:9871\$request_uri;
-}
-EOF
+#server {
+#    listen 80;
+#    server_name $DOMAIN;
+#    return 301 https://\$server_name:9871\$request_uri;
+#}
+#EOF
 
 ln -sf /etc/nginx/sites-available/amnezia-stats /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
