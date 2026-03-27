@@ -94,6 +94,7 @@ if (empty($peer_key)) {
     die('Peer key required');
 }
 
+// Читаем конфиг из контейнера
 $config = shell_exec("docker exec amnezia-awg cat /opt/amnezia/awg/wg0.conf 2>/dev/null");
 if (empty($config)) {
     http_response_code(500);
@@ -102,52 +103,71 @@ if (empty($config)) {
 
 $lines = explode("\n", $config);
 $interface_section = "";
-$peer_config = "";
+$peer_section = "";
 $in_interface = false;
 $in_peer = false;
 $found_peer = false;
+$peer_content = "";
 
+// Собираем весь конфиг
 foreach ($lines as $line) {
+    // Начало секции Interface
     if (preg_match('/^\[Interface\]/', $line)) {
         $in_interface = true;
+        $in_peer = false;
         $interface_section = "[Interface]\n";
         continue;
     }
+    
+    // Начало секции Peer
+    if (preg_match('/^\[Peer\]/', $line)) {
+        $in_interface = false;
+        $in_peer = true;
+        $peer_content = "";
+        continue;
+    }
+    
+    // Собираем Interface
     if ($in_interface) {
-        if (preg_match('/^\[Peer\]/', $line)) {
-            $in_interface = false;
-            $in_peer = true;
-            $peer_config = "[Peer]\n";
-            continue;
-        }
         $interface_section .= $line . "\n";
     }
     
+    // Собираем Peer
     if ($in_peer) {
-        $peer_config .= $line . "\n";
+        $peer_content .= $line . "\n";
+        
+        // Проверяем, соответствует ли ключ
         if (preg_match('/PublicKey\s*=\s*' . preg_quote($peer_key, '/') . '/', $line)) {
             $found_peer = true;
         }
+        
+        // Конец секции Peer (пустая строка или начало новой секции)
         if (trim($line) === "" || preg_match('/^\[/', $line)) {
             if ($found_peer) {
-                $client_config = $interface_section . "\n" . $peer_config;
+                // Формируем конфиг клиента
+                $client_config = $interface_section . "\n" . trim($peer_content) . "\n";
+                
+                // Отправляем как текстовый файл
                 header('Content-Type: text/plain');
                 header('Content-Disposition: attachment; filename="amneziawg-client-' . substr($peer_key, 0, 8) . '.conf"');
                 echo $client_config;
                 exit;
             }
             $in_peer = false;
-            $peer_config = "";
             $found_peer = false;
         }
     }
 }
 
+// Если не нашли peer
 http_response_code(404);
 die('Peer not found: ' . $peer_key);
 ?>
 EOF
 
+# Устанавливаем права
+chown www-data:www-data /var/www/amnezia-stats/get_config.php
+chmod 755 /var/www/amnezia-stats/get_config.php
 cat > /var/www/amnezia-stats/sort.php << 'EOF'
 <?php
 $type = isset($_GET['type']) ? $_GET['type'] : 'ip';
