@@ -16,29 +16,16 @@ echo -e "${GREEN}AmneziaWG Monitor PRO (порт 9871)${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 # Запрашиваем данные
-#echo -e "\n${YELLOW}Настройка авторизации:${NC}"
-#read -p "Введите логин для доступа к панели [admin]: " AUTH_USER
-#AUTH_USER=${AUTH_USER:-admin}
+echo -e "\n${YELLOW}Настройка авторизации:${NC}"
+read -p "Введите логин для доступа к панели [admin]: " AUTH_USER
+AUTH_USER=${AUTH_USER:-admin}
 
-#read -sp "Введите пароль для доступа к панели: " AUTH_PASS
-#echo ""
-#if [ -z "$AUTH_PASS" ]; then
-#    AUTH_PASS=$(openssl rand -base64 12)
-#   echo -e "${YELLOW}Пароль сгенерирован: ${GREEN}$AUTH_PASS${NC}"
-#fi
-
-#echo -e "\n${YELLOW}Настройка SSL (Let's Encrypt):${NC}"
-#read -p "Введите доменное имя (например, vpn.example.com): " DOMAIN
-#if [ -z "$DOMAIN" ]; then
-#    echo -e "${RED}Домен обязателен для SSL!${NC}"
-#    exit 1
-#fi
-
-#read -p "Введите email для Let's Encrypt: " SSL_EMAIL
-#if [ -z "$SSL_EMAIL" ]; then
-#    echo -e "${RED}Email обязателен для Let's Encrypt!${NC}"
-#    exit 1
-#fi
+read -sp "Введите пароль для доступа к панели: " AUTH_PASS
+echo ""
+if [ -z "$AUTH_PASS" ]; then
+    AUTH_PASS=$(openssl rand -base64 12)
+    echo -e "${YELLOW}Пароль сгенерирован: ${GREEN}$AUTH_PASS${NC}"
+fi
 
 # 1. Проверяем контейнер
 echo -e "\n${YELLOW}[1/11] Проверка контейнера amnezia-awg...${NC}"
@@ -57,8 +44,8 @@ echo -e "${GREEN}✅ Обнаружен порт: $WG_PORT${NC}"
 
 # 3. Устанавливаем зависимости
 echo -e "\n${YELLOW}[3/11] Установка зависимостей...${NC}"
-apt update && apt install -y cron
-#apt install -y nginx php-fpm certbot python3-certbot-nginx apache2-utils jq curl
+apt update
+apt install -y nginx php8.1-fpm apache2-utils jq curl cron
 echo -e "${GREEN}✅ Зависимости установлены${NC}"
 
 # 4. Создаём директории
@@ -74,17 +61,10 @@ echo -e "${GREEN}✅ Авторизация настроена${NC}"
 
 # 6. Определяем PHP-FPM сокет
 echo -e "\n${YELLOW}[6/11] Определение PHP-FPM...${NC}"
-PHP_FPM_SOCK=""
-for version in 8.2 8.1 8.0 7.4; do
-    if [ -f "/var/run/php/php${version}-fpm.sock" ]; then
-        PHP_FPM_SOCK="unix:/var/run/php/php${version}-fpm.sock"
-        break
-    elif systemctl is-active --quiet php${version}-fpm 2>/dev/null; then
-        PHP_FPM_SOCK="unix:/var/run/php/php${version}-fpm.sock"
-        break
-    fi
-done
-[ -z "$PHP_FPM_SOCK" ] && PHP_FPM_SOCK="127.0.0.1:9000"
+PHP_FPM_SOCK="unix:/var/run/php/php8.1-fpm.sock"
+if [ ! -S "$PHP_FPM_SOCK" ]; then
+    PHP_FPM_SOCK="127.0.0.1:9000"
+fi
 echo -e "${GREEN}✅ PHP-FPM: $PHP_FPM_SOCK${NC}"
 
 # 7. Создаём PHP обработчики
@@ -170,8 +150,20 @@ fi
 chmod 644 /var/www/amnezia-stats/peer_names.json
 echo -e "${GREEN}✅ Обработчики созданы${NC}"
 
-# 8. Создаём генератор статистики с сортировкой
-echo -e "\n${YELLOW}[8/11] Создание генератора статистики (с сортировкой)...${NC}"
+# 8. Создаём обработчик сортировки
+echo -e "\n${YELLOW}[8/11] Создание обработчика сортировки...${NC}"
+cat > /var/www/amnezia-stats/sort.php << 'EOF'
+<?php
+$type = isset($_GET['type']) ? $_GET['type'] : 'ip';
+file_put_contents(__DIR__ . '/sort.txt', $type);
+header('Content-Type: application/json');
+echo json_encode(['status' => 'ok', 'type' => $type]);
+?>
+EOF
+chmod 644 /var/www/amnezia-stats/sort.php
+
+# 9. Создаём генератор статистики с сортировкой
+echo -e "\n${YELLOW}[9/11] Создание генератора статистики...${NC}"
 cat > /usr/local/bin/gen_stats.sh << 'EOF'
 #!/bin/bash
 
@@ -206,7 +198,6 @@ PEER_HANDSHAKE=""
 while IFS= read -r line; do
     if [[ "$line" =~ ^peer:\ (.+)$ ]]; then
         if [ -n "$CURRENT_PEER" ]; then
-            # Добавляем клиента в массив
             CLIENTS+=("$CURRENT_PEER|$PEER_IP|$PEER_ENDPOINT|$PEER_RX|$PEER_TX|$PEER_HANDSHAKE")
         fi
         CURRENT_PEER="${BASH_REMATCH[1]}"
@@ -219,12 +210,11 @@ while IFS= read -r line; do
     fi
 done <<< "$WG_OUTPUT"
 
-# Добавляем последнего
 if [ -n "$CURRENT_PEER" ]; then
     CLIENTS+=("$CURRENT_PEER|$PEER_IP|$PEER_ENDPOINT|$PEER_RX|$PEER_TX|$PEER_HANDSHAKE")
 fi
 
-# Функция для конвертации IP в число для сортировки
+# Функция для конвертации IP в число
 ip_to_int() {
     local ip="${1%/*}"
     local a b c d
@@ -250,12 +240,12 @@ bytes_to_int() {
     fi
 }
 
-# Сортировка по IP (по умолчанию)
+# Сортировка по IP
 sort_peers_by_ip() {
     printf '%s\n' "${CLIENTS[@]}" | sort -t'|' -k2 -V
 }
 
-# Сортировка по полученным байтам (RX)
+# Сортировка по полученным байтам
 sort_peers_by_rx() {
     printf '%s\n' "${CLIENTS[@]}" | while IFS='|' read -r key ip ep rx tx hs; do
         rx_bytes=$(bytes_to_int "$rx")
@@ -263,7 +253,7 @@ sort_peers_by_rx() {
     done | sort -t'|' -k1 -rn | cut -d'|' -f2-
 }
 
-# Сортировка по отправленным байтам (TX)
+# Сортировка по отправленным байтам
 sort_peers_by_tx() {
     printf '%s\n' "${CLIENTS[@]}" | while IFS='|' read -r key ip ep rx tx hs; do
         tx_bytes=$(bytes_to_int "$tx")
@@ -271,8 +261,13 @@ sort_peers_by_tx() {
     done | sort -t'|' -k1 -rn | cut -d'|' -f2-
 }
 
-# По умолчанию сортировка по IP
-SORT_TYPE="${1:-ip}"
+# Читаем сохранённый тип сортировки из файла
+SORT_FILE="/var/www/amnezia-stats/sort.txt"
+SORT_TYPE="ip"
+if [ -f "$SORT_FILE" ]; then
+    SORT_TYPE=$(cat "$SORT_FILE")
+fi
+
 case "$SORT_TYPE" in
     ip)   SORTED_CLIENTS=$(sort_peers_by_ip) ;;
     rx)   SORTED_CLIENTS=$(sort_peers_by_rx) ;;
@@ -333,7 +328,6 @@ cat > /var/www/amnezia-stats/index.html << HTML
         @media (max-width:768px){th,td{padding:8px;font-size:0.75rem}.stat-number{font-size:1.8rem}.name-input{width:120px}}
     </style>
     <script>
-        let currentSort = 'ip';
         function editName(peerKey, currentName) {
             const cell = document.getElementById('name-cell-' + peerKey);
             cell.innerHTML = '<input type="text" id="name-input-' + peerKey + '" value="' + currentName.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '" class="name-input" onkeypress="if(event.key===\'Enter\') saveName(\'' + peerKey + '\')"> ' +
@@ -349,17 +343,10 @@ cat > /var/www/amnezia-stats/index.html << HTML
         }
         function downloadConfig(peerKey){window.location.href='/get_config.php?peer='+encodeURIComponent(peerKey);}
         function sortBy(type) {
-            currentSort = type;
             fetch('/sort.php?type=' + type)
                 .then(() => location.reload())
                 .catch(() => location.reload());
         }
-        function updateSortIndicator() {
-            document.querySelectorAll('.sort-indicator').forEach(el => el.textContent = '');
-            const indicator = document.getElementById('sort-indicator-' + currentSort);
-            if (indicator) indicator.textContent = ' ▼';
-        }
-        window.onload = updateSortIndicator;
     </script>
 </head>
 <body>
@@ -378,16 +365,16 @@ cat > /var/www/amnezia-stats/index.html << HTML
 
     <h2>👥 Подключения клиентов</h2>
     <div style="overflow-x: auto;">
-        <table>
+        8表
             <thead>
                 <tr>
-                    <th onclick="sortBy('ip')">Имя <span id="sort-indicator-ip" class="sort-indicator"></span></th>
-                    <th onclick="sortBy('ip')">Статус</th>
-                    <th onclick="sortBy('ip')">IP адрес <span id="sort-indicator-ip" class="sort-indicator"></span></th>
+                    <th onclick="sortBy('ip')">Имя</th>
+                    <th>Статус</th>
+                    <th onclick="sortBy('ip')">IP адрес</th>
                     <th>Публичный ключ</th>
                     <th>Endpoint</th>
-                    <th onclick="sortBy('rx')">Получено <span id="sort-indicator-rx" class="sort-indicator"></span></th>
-                    <th onclick="sortBy('tx')">Отправлено <span id="sort-indicator-tx" class="sort-indicator"></span></th>
+                    <th onclick="sortBy('rx')">Получено</th>
+                    <th onclick="sortBy('tx')">Отправлено</th>
                     <th>Handshake</th>
                     <th>Конфиг</th>
                 </tr>
@@ -411,22 +398,22 @@ while IFS='|' read -r peer_key peer_ip peer_ep peer_rx peer_tx peer_hs; do
         status_class="status-offline"
     fi
     
-    echo "<tr>
-        <td id=\"name-cell-${peer_key}\"><span class=\"editable-name\" onclick=\"editName('${peer_key}', '${peer_name//\'/\\\'}')\">📝 ${peer_name}</span></td>
-        <td class=\"$status_class\">$status</td>
-        <td><code>${peer_ip:-—}</code></td>
-        <td><span class=\"peer-key\">${peer_key:0:32}...</span></td>
-        <td>${peer_ep:-—}</td>
-        <td>${peer_rx:-0}</td>
-        <td>${peer_tx:-0}</td>
-        <td>${peer_hs:-никогда}</td>
-        <td><button class=\"download-btn\" onclick=\"downloadConfig('${peer_key}')\">📥 Конфиг</button></td>
+    echo "汽
+        <td id=\"name-cell-${peer_key}\"><span class=\"editable-name\" onclick=\"editName('${peer_key}', '${peer_name//\'/\\\'}')\">📝 ${peer_name}</span>刷
+        <td class=\"$status_class\">$status刷
+        <td><code>${peer_ip:-—}</code>刷
+        <td><span class=\"peer-key\">${peer_key:0:32}...</span>刷
+        <td>${peer_ep:-—}刷
+        <td>${peer_rx:-0}刷
+        <td>${peer_tx:-0}刷
+        <td>${peer_hs:-никогда}刷
+        <td><button class=\"download-btn\" onclick=\"downloadConfig('${peer_key}')\">📥 Конфиг</button>刷
     </tr>" >> /var/www/amnezia-stats/index.html
 done <<< "$SORTED_CLIENTS"
 
 cat >> /var/www/amnezia-stats/index.html << HTML
             </tbody>
-        </table>
+        8</table>
     </div>
     
     <div class="note">
@@ -454,21 +441,9 @@ EOF
 chmod +x /usr/local/bin/gen_stats.sh
 echo -e "${GREEN}✅ Генератор статистики создан${NC}"
 
-# 9. Создаём обработчик сортировки
-echo -e "\n${YELLOW}[9/11] Создание обработчика сортировки...${NC}"
-cat > /var/www/amnezia-stats/sort.php << 'EOF'
-<?php
-$type = isset($_GET['type']) ? $_GET['type'] : 'ip';
-setcookie('amnezia_sort', $type, time() + 86400 * 30, '/');
-echo 'ok';
-?>
-EOF
-chmod 644 /var/www/amnezia-stats/sort.php
-
-# 10. Настраиваем Nginx на порт 9871 (без SSL)
+# 10. Настраиваем Nginx на порт 9871
 echo -e "\n${YELLOW}[10/11] Настройка Nginx на порт 9871...${NC}"
 
-# Экранируем переменные для Nginx, но подставляем значение PHP_FPM_SOCK
 cat > /etc/nginx/sites-available/amnezia-stats << EOF
 server {
     listen 9871;
@@ -486,7 +461,7 @@ server {
 
     location ~ \\.php\$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass ${PHP_FPM_SOCK};
+        fastcgi_pass $PHP_FPM_SOCK;
     }
 }
 EOF
@@ -497,22 +472,11 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl restart nginx
 echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
 
-ln -sf /etc/nginx/sites-available/amnezia-stats /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-
-nginx -t && systemctl restart nginx
-echo -e "${GREEN}✅ Nginx настроен на порт 9871${NC}"
-
-# 11. Получаем SSL сертификат
-#echo -e "\n${YELLOW}[11/11] Получение SSL сертификата...${NC}"
-#certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$SSL_EMAIL" || {
-#    echo -e "${RED}⚠️ Не удалось получить SSL сертификат${NC}"
-#    echo -e "${YELLOW}Проверьте, что домен $DOMAIN указывает на этот сервер и порт 80 открыт${NC}"
-#}
-
 # Настройка cron
+echo -e "\n${YELLOW}[11/11] Настройка автообновления...${NC}"
 (crontab -l 2>/dev/null | grep -v gen_stats.sh; echo "* * * * * /usr/local/bin/gen_stats.sh") | crontab -
 (crontab -l 2>/dev/null | grep -v "sleep 30"; echo "* * * * * sleep 30; /usr/local/bin/gen_stats.sh") | crontab -
+systemctl restart cron
 
 # Запускаем генерацию
 /usr/local/bin/gen_stats.sh
@@ -524,9 +488,8 @@ echo -e "\n${GREEN}========================================${NC}"
 echo -e "${GREEN}✅ УСТАНОВКА ЗАВЕРШЕНА!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo -e ""
-#echo -e "${YELLOW}🌐 Панель доступна по адресу:${NC}"
-#echo -e "${GREEN}   https://${DOMAIN}:9871${NC}"
-echo -e "${YELLOW}   или https://${SERVER_IP}:9871 (если SSL не настроен)${NC}"
+echo -e "${YELLOW}🌐 Панель доступна по адресу:${NC}"
+echo -e "${GREEN}   http://${SERVER_IP}:9871${NC}"
 echo -e ""
 echo -e "${YELLOW}🔑 Данные для входа:${NC}"
 echo -e "   • Логин: ${GREEN}$AUTH_USER${NC}"
