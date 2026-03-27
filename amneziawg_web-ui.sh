@@ -468,7 +468,8 @@ chmod 644 /var/www/amnezia-stats/sort.php
 # 10. Настраиваем Nginx на порт 9871 (без SSL)
 echo -e "\n${YELLOW}[10/11] Настройка Nginx на порт 9871...${NC}"
 
-cat > /etc/nginx/sites-available/amnezia-stats << 'EOF'
+# Экранируем переменные для Nginx, но подставляем значение PHP_FPM_SOCK
+cat > /etc/nginx/sites-available/amnezia-stats << EOF
 server {
     listen 9871;
     server_name _;
@@ -480,12 +481,12 @@ server {
     auth_basic_user_file /etc/nginx/.htpasswd;
 
     location / {
-        try_files $uri $uri/ =404;
+        try_files \$uri \$uri/ =404;
     }
 
-    location ~ \.php$ {
+    location ~ \\.php\$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass $PHP_FPM_SOCK;
+        fastcgi_pass ${PHP_FPM_SOCK};
     }
 }
 EOF
